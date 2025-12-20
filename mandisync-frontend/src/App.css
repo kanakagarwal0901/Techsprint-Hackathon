@@ -1,0 +1,226 @@
+:root {
+  --primary-orange: #FF9F1C;
+  --primary-yellow: #FFBF00;
+  --bg-white: #FFFFFF;
+  --text-dark: #2D3436;
+  --text-light: #636E72;
+  --danger-red: #FF4757;
+  --bg-grey: #F5F6FA;
+}
+
+body {
+  margin: 0;
+  font-family: 'Inter', sans-serif; /* Make sure to import a nice font if you can */
+  background-color: var(--bg-grey);
+  color: var(--text-dark);
+}
+
+/* --- NAVBAR --- */
+.navbar {
+  background-color: var(--bg-white);
+  padding: 1rem 2rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+}
+
+.logo-text {
+  font-weight: 800;
+  font-size: 1.5rem;
+  color: var(--text-dark);
+}
+
+.highlight {
+  color: var(--primary-orange);
+}
+
+/* --- DASHBOARD --- */
+.dashboard {
+  padding: 2rem;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.dashboard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2rem;
+}
+
+/* Filter Buttons */
+.filter-controls button {
+  background: transparent;
+  border: 2px solid var(--text-light);
+  padding: 0.5rem 1rem;
+  margin-left: 0.5rem;
+  border-radius: 20px;
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--text-light);
+  transition: all 0.2s;
+}
+
+.filter-controls button.active {
+  background-color: var(--primary-orange);
+  border-color: var(--primary-orange);
+  color: white;
+}
+
+/* --- GRID --- */
+.event-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 1.5rem;
+}
+
+/* --- CARD DESIGN --- */
+.event-card {
+  background: var(--bg-white);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+  display: flex;
+  position: relative;
+  transition: transform 0.2s;
+}
+
+.event-card:hover {
+  transform: translateY(-5px);
+}
+
+/* Feature: Yellow Highlight for 'This Week' */
+.glow-border {
+  border: 2px solid var(--primary-yellow);
+}
+
+/* Left Date Badge */
+.date-badge {
+  background-color: var(--primary-orange);
+  color: white;
+  width: 70px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: 1rem 0;
+}
+
+.date-badge .month {
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+.date-badge .day {
+  font-size: 1.8rem;
+  font-weight: 800;
+}
+
+/* Card Content */
+.card-content {
+  padding: 1rem;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.card-header {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.tag {
+  font-size: 0.7rem;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.tag.urgent {
+  background-color: var(--danger-red);
+  color: white;
+}
+
+.tag.clash {
+  background-color: #2D3436;
+  color: var(--primary-yellow);
+}
+
+.event-title {
+  margin: 0 0 0.5rem 0;
+  font-size: 1.1rem;
+}
+
+.event-details p {
+  margin: 0.2rem 0;
+  font-size: 0.9rem;
+  color: var(--text-light);
+}
+
+/* Feature 7: TL;DR Box */
+.tldr-box {
+  background-color: #FFF8E1; /* Light yellow bg */
+  padding: 0.5rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  margin: 1rem 0;
+  color: #555;
+  border-left: 3px solid var(--primary-yellow);
+}
+
+/* Register Button */
+.register-btn {
+  margin-top: auto;
+  background-color: var(--primary-yellow);
+  color: var(--text-dark);
+  border: none;
+  padding: 0.75rem;
+  border-radius: 6px;
+  font-weight: 700;
+  cursor: pointer;
+  width: 100%;
+  transition: background 0.2s;
+}
+
+.register-btn:hover {
+  background-color: #FFC926;
+}
+
+/* ... Keep all your previous CSS ... */
+
+/* NEW: Container for Right side of Navbar */
+.nav-controls {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem; /* Space between Clash button and Profile */
+}
+
+/* NEW: Clash Toggle Button */
+.clash-toggle-btn {
+    background-color: transparent;
+    border: 2px solid var(--danger-red); /* Matches the 'Urgent' red */
+    color: var(--danger-red);
+    padding: 0.5rem 1rem;
+    border-radius: 8px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.clash-toggle-btn:hover {
+    background-color: rgba(255, 71, 87, 0.1); /* Subtle red tint on hover */
+}
+
+/* Active State (When clicked) */
+.clash-toggle-btn.active {
+    background-color: var(--danger-red);
+    color: white;
+    box-shadow: 0 0 10px rgba(255, 71, 87, 0.4);
+}

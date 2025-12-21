@@ -1,2 +1,5 @@
-.env
 node_modules/
+.env
+credentials.json
+token.json  <-- ADD THIS LINE
+cache.json

@@ -15,11 +15,16 @@ const CREDENTIALS_PATH = path.join(__dirname, 'credentials.json');
 const TOKEN_PATH = path.join(__dirname, 'token.json');
 const CACHE_FILE = path.join(__dirname, 'cache.json');
 
-// --- 1. USE STABLE MODEL ---
+// --- AI CONFIGURATION ---
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-001" }); 
+const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" }); 
 
-// --- HELPER: CACHE SYSTEM ---
+// --- AUTO-CLEAN CACHE ---
+if (fs.existsSync(CACHE_FILE)) {
+    try { fs.unlinkSync(CACHE_FILE); } catch(e) {}
+}
+
+// --- HELPER FUNCTIONS ---
 function loadCache() {
     if (!fs.existsSync(CACHE_FILE)) return {};
     return JSON.parse(fs.readFileSync(CACHE_FILE));
@@ -39,29 +44,24 @@ function getGmailClient() {
 }
 
 async function parseWithGemini(emailText, emailId) {
-    // 1. Check Cache
     const cache = loadCache();
-    if (cache[emailId]) {
-        console.log(`⚡ Cache Hit: ${emailId}`);
-        return cache[emailId];
-    }
+    if (cache[emailId]) return cache[emailId];
 
     const cleanText = emailText.substring(0, 1000).replace(/\s+/g, ' '); 
-    
-    // 2. STRONG PROMPT (Forces Date)
+    const today = new Date().toISOString().split('T')[0];
+
     const prompt = `
-    Extract event details from this email as JSON.
+    Extract event details as JSON.
+    CONTEXT: Today is ${today}.
     
-    CRITICAL RULES:
-    1. "date": Must be YYYY-MM-DD. 
-       - If email says "tomorrow", assume today is 2025-10-24. 
-       - If no year is found, assume 2025.
-       - If NO date is found, return "2025-10-28" (Do not leave empty).
-    2. "time": HH:MM AM/PM. If missing, use "10:00 AM".
-    3. "venue": If missing, use "North Campus".
+    RULES:
+    1. "date": YYYY-MM-DD. 
+       - If email says "tomorrow", calculate from ${today}.
+       - If "today", use ${today}.
+    2. "time": HH:MM AM/PM.
+    3. "venue": Location.
     
-    JSON Structure: { "title": "", "date": "", "time": "", "venue": "", "summary": "", "urgent": false, "clash": false }
-    
+    JSON: { "title": "", "date": "", "time": "", "venue": "", "summary": "" }
     Email: "${cleanText}"
     `;
 
@@ -70,68 +70,75 @@ async function parseWithGemini(emailText, emailId) {
         const response = await result.response;
         let text = response.text().replace(/```json/g, '').replace(/```/g, '').trim();
         let jsonData = JSON.parse(text);
-
-        // 3. THE DATE GUARDIAN (Backend Fallback)
-        // If AI still fails to give a date, we force one here before sending to frontend.
-        if (!jsonData.date || jsonData.date === "") {
-            console.log(`⚠️ AI missed date for ${emailId}, applying fallback.`);
-            jsonData.date = "2025-10-28";
-        }
-        if (!jsonData.time) jsonData.time = "10:00 AM";
-
-        // Save to cache
+        
         cache[emailId] = jsonData;
         saveCache(cache);
-        
         return jsonData;
 
     } catch (error) {
         console.error(`⚠️ AI Error: ${error.message}`);
-        return { 
-            title: "New Event (Loading...)", 
-            date: "2025-10-28", // Emergency Date
-            time: "10:00 AM", 
-            venue: "Campus", 
-            summary: "Details are being fetched...",
-            urgent: false
-        };
+        return null;
     }
 }
 
 app.get('/api/refresh-events', async (req, res) => {
-    console.log("🔄 Fetching emails...");
+    console.log("🔄 Fetching emails from the last 48 hours...");
     try {
         const gmail = getGmailClient();
+        
+        // --- THE FIX: "newer_than:2d" ---
         const response = await gmail.users.messages.list({
             userId: 'me',
-            maxResults: 6, // Fetch a few more to populate the grid
-            q: 'subject:(event OR session OR hackathon)' 
+            maxResults: 20, 
+            q: 'subject:(event OR session OR hackathon OR contest OR competition OR club OR webinar OR workshop OR internship) newer_than:2d' 
         });
 
         const messages = response.data.messages || [];
+        
+        // If no emails found in the last 2 days, STOP.
+        if (messages.length === 0) {
+            console.log("📭 No relevant emails found in the last 2 days.");
+            return res.json({ success: true, events: [] });
+        }
+
         const processedEvents = [];
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
 
         for (const msg of messages) {
-            // Check cache first to be instant
+            let eventData;
             const cache = loadCache();
+
+            // Fetch Email Content
+            const email = await gmail.users.messages.get({ userId: 'me', id: msg.id });
+            const subjectHeader = email.data.payload.headers.find(h => h.name === 'Subject');
+            const subject = subjectHeader ? subjectHeader.value : "No Subject";
+
+            console.log(`📧 Found: "${subject}"`);
+
             if (cache[msg.id]) {
-                processedEvents.push({ id: msg.id, ...cache[msg.id] });
+                eventData = cache[msg.id];
+            } else {
+                eventData = await parseWithGemini(email.data.snippet, msg.id);
+                console.log("   ⏳ Waiting 2s...");
+                await new Promise(resolve => setTimeout(resolve, 2000));
+            }
+
+            if (!eventData || !eventData.date) continue;
+
+            const eventDate = new Date(eventData.date);
+            if (isNaN(eventDate.getTime())) continue;
+
+            if (eventDate < today) {
+                console.log(`   ❌ Skipped (Past Event: ${eventData.date})`);
                 continue; 
             }
 
-            console.log(`🤖 Analyzing NEW email: ${msg.id}...`);
-            const email = await gmail.users.messages.get({ userId: 'me', id: msg.id });
-            const snippet = email.data.snippet;
-            
-            const aiData = await parseWithGemini(snippet, msg.id);
-            processedEvents.push({ id: msg.id, ...aiData });
-
-            // Wait ONLY for new emails
-            console.log("   ⏳ Waiting 2s...");
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            console.log(`   ✅ KEPT: ${eventData.title}`);
+            processedEvents.push({ id: msg.id, ...eventData });
         }
 
-        console.log("✅ Done! Sending to frontend.");
+        console.log(`🚀 Sending ${processedEvents.length} valid events.`);
         res.json({ success: true, events: processedEvents });
 
     } catch (error) {

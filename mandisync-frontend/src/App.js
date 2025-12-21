@@ -45,6 +45,26 @@ const markClashes = (eventsList) => {
     return cleanEvents;
 };
 
+// --- HELPER: LOCAL STORAGE MANAGER ---
+const getStoredEvents = () => {
+    const stored = localStorage.getItem('manualEvents');
+    if (!stored) return [];
+    
+    const parsed = JSON.parse(stored);
+    const now = new Date().getTime();
+
+    const validEvents = parsed.filter(e => {
+        const eventTime = parseDateTime(e.date, e.time);
+        return eventTime > now || eventTime === 0; 
+    });
+
+    if (validEvents.length !== parsed.length) {
+        localStorage.setItem('manualEvents', JSON.stringify(validEvents));
+    }
+
+    return validEvents;
+};
+
 // --- 1. LOGIN PAGE COMPONENT ---
 const LoginPage = ({ onLogin }) => {
   const [email, setEmail] = useState("");
@@ -71,7 +91,7 @@ const LoginPage = ({ onLogin }) => {
       <div className="login-card">
         <div className="login-header">
           <h1>Mandi<span className="highlight">Sync</span></h1>
-          <p>Your AI-Powered Campus Assistant</p>
+          <p>From Inbox to Calendar, Instantly</p>
         </div>
         <form onSubmit={handleLogin}>
           <div className="input-group">
@@ -89,7 +109,7 @@ const LoginPage = ({ onLogin }) => {
             {isAnimating ? "Verifying..." : "Continue with Google"}
           </button>
         </form>
-        <div className="login-footer"><p>Protected by IIT Mandi Gymkhana</p></div>
+        <div className="login-footer"><p>Your Inbox Decoded. Your Day Sorted</p></div>
       </div>
     </div>
   );
@@ -106,37 +126,40 @@ const Dashboard = ({ user, onLogout }) => {
   const [newEvent, setNewEvent] = useState({ title: "", date: "", time: "", venue: "", summary: "" });
 
   useEffect(() => {
-    const fetchEmails = async () => {
+    const fetchAllData = async () => {
+      let combinedEvents = [];
+      const manualEvents = getStoredEvents();
+      combinedEvents = [...manualEvents];
+
       try {
-        console.log("📡 Frontend: Requesting data...");
+        console.log("📡 Frontend: Requesting backend data...");
         const response = await fetch('http://localhost:5000/api/refresh-events');
         
-        if (!response.ok) throw new Error(`Status: ${response.status}`);
-
-        const data = await response.json();
-        if (data.success && Array.isArray(data.events)) {
-          // MAPPING: NO FALLBACKS allowed for Date/Title
-          const rawEvents = data.events.map(e => ({
-            id: e.id || Math.random(),
-            title: e.title || "Untitled Event",
-            date: e.date, // <--- DIRECT BACKEND DATA (No "|| 2025-10-24")
-            time: e.time || "Time TBD",
-            venue: e.venue || "Campus",
-            summary: e.summary || "No details available.",
-            urgent: e.urgent || false,
-            clash: false, 
-            isThisWeek: true 
-          }));
-          
-          setEvents(markClashes(rawEvents));
+        if (response.ok) {
+            const data = await response.json();
+            if (data.success && Array.isArray(data.events)) {
+                const apiEvents = data.events.map(e => ({
+                    id: e.id || Math.random(),
+                    title: e.title || "Untitled Event",
+                    date: e.date, 
+                    time: e.time || "Time TBD",
+                    venue: e.venue || "Campus",
+                    summary: e.summary || "No details available.",
+                    urgent: e.urgent || false,
+                    clash: false, 
+                    isThisWeek: true 
+                }));
+                combinedEvents = [...manualEvents, ...apiEvents];
+            }
         }
       } catch (error) {
-        console.error("❌ Frontend Connection Failed:", error);
+        console.error("❌ Backend failed, showing local only:", error);
       } finally {
+        setEvents(markClashes(combinedEvents));
         setLoading(false);
       }
     };
-    fetchEmails();
+    fetchAllData();
   }, []);
 
   const handleAddEvent = (e) => {
@@ -146,9 +169,14 @@ const Dashboard = ({ user, onLogout }) => {
         ...newEvent,
         urgent: false,
         clash: false,
-        isThisWeek: true
+        isThisWeek: true,
+        isManual: true 
     };
     
+    const currentStored = getStoredEvents();
+    const updatedStored = [manualEvent, ...currentStored];
+    localStorage.setItem('manualEvents', JSON.stringify(updatedStored));
+
     const updatedList = [manualEvent, ...events];
     setEvents(markClashes(updatedList)); 
 
@@ -162,7 +190,7 @@ const Dashboard = ({ user, onLogout }) => {
     <div className="app-container">
       <header className="navbar">
         <div className="logo">
-          <span className="logo-text">Mandi<span className="highlight">Sync</span></span>
+          <span className="logo-text">🏔️ Mandi<span className="highlight">Sync</span></span>
         </div>
         <div className="nav-controls">
             <button 
@@ -180,7 +208,7 @@ const Dashboard = ({ user, onLogout }) => {
 
       <main className="dashboard">
         <div className="dashboard-header">
-          <h1>{showClashesOnly ? '⚠️ Conflicting Events' : 'Master Calendar'}</h1>
+          <h1>{showClashesOnly ? '⚠️ Conflicting Events' : '🗓️ Calendar'}</h1>
           <div className="filter-controls">
             <button className={filter === 'All' ? 'active' : ''} onClick={() => setFilter('All')}>All</button>
             <button className={filter === 'North' ? 'active' : ''} onClick={() => setFilter('North')}>North</button>
@@ -194,7 +222,13 @@ const Dashboard = ({ user, onLogout }) => {
             <div className="event-grid">
             {events
                 .filter(e => {
-                    const matchesLoc = filter === 'All' || (e.venue && e.venue.includes(filter));
+                    // --- THE FIX IS HERE ---
+                    // 1. Check if venue exists
+                    // 2. Convert both venue and filter to Lowercase before checking
+                    const venueText = e.venue ? e.venue.toLowerCase() : "";
+                    const filterText = filter.toLowerCase();
+
+                    const matchesLoc = filter === 'All' || venueText.includes(filterText);
                     const matchesClash = showClashesOnly ? e.clash === true : true;
                     return matchesLoc && matchesClash;
                 })
@@ -256,21 +290,16 @@ const Dashboard = ({ user, onLogout }) => {
   );
 };
 
-// --- 3. EVENT CARD COMPONENT (No Defaults) ---
+// --- 3. EVENT CARD COMPONENT ---
 const EventCard = ({ data }) => {
-  // 1. Initial Defaults (Shows ONLY if backend is broken)
   let month = "TBD";
   let day = "--";
 
-  // 2. Strict Parsing: Only works if data.date exists
   if (data.date) {
-    // Splits "2023-10-27" correctly regardless of timezone
     const parts = data.date.split('-'); 
-    
     if (parts.length === 3) {
       const monthNames = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
       const monthIndex = parseInt(parts[1], 10) - 1; 
-      
       if (monthNames[monthIndex]) {
         month = monthNames[monthIndex];
         day = parts[2];
@@ -288,13 +317,14 @@ const EventCard = ({ data }) => {
         <div className="card-header">
           {data.urgent && <span className="tag urgent">Urgent</span>}
           {data.clash && <span className="tag clash">⚠️ Clash Detected</span>}
+          {data.isManual && <span className="tag manual" style={{background:'#4CAF50', color:'white', marginLeft:'5px', padding:'2px 6px', borderRadius:'4px', fontSize:'0.7rem'}}>My Event</span>}
         </div>
         <h3 className="event-title">{data.title}</h3>
         <div className="event-details">
           <p>🕒 {data.time}</p>
           <p>📍 {data.venue}</p>
         </div>
-        <div className="tldr-box"><strong>TL;DR:</strong> {data.summary}</div>
+        <div className="tldr-box"><strong>Subject: </strong> {data.summary}</div>
         <button className="register-btn">Register Now</button>
       </div>
     </div>

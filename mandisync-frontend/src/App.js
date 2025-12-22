@@ -123,7 +123,8 @@ const Dashboard = ({ user, onLogout }) => {
   const [loading, setLoading] = useState(true);
   
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [newEvent, setNewEvent] = useState({ title: "", date: "", time: "", venue: "", summary: "" });
+  // NEW: Added 'link' to state
+  const [newEvent, setNewEvent] = useState({ title: "", date: "", time: "", venue: "", link: "", summary: "" });
 
   useEffect(() => {
     const fetchAllData = async () => {
@@ -144,6 +145,8 @@ const Dashboard = ({ user, onLogout }) => {
                     date: e.date, 
                     time: e.time || "Time TBD",
                     venue: e.venue || "Campus",
+                    // NEW: Capture Link
+                    link: e.link || null,
                     summary: e.summary || "No details available.",
                     urgent: e.urgent || false,
                     clash: false, 
@@ -181,7 +184,7 @@ const Dashboard = ({ user, onLogout }) => {
     setEvents(markClashes(updatedList)); 
 
     setIsModalOpen(false); 
-    setNewEvent({ title: "", date: "", time: "", venue: "", summary: "" }); 
+    setNewEvent({ title: "", date: "", time: "", venue: "", link: "", summary: "" }); 
   };
 
   const clashCount = events.filter(e => e.clash).length;
@@ -222,9 +225,6 @@ const Dashboard = ({ user, onLogout }) => {
             <div className="event-grid">
             {events
                 .filter(e => {
-                    // --- THE FIX IS HERE ---
-                    // 1. Check if venue exists
-                    // 2. Convert both venue and filter to Lowercase before checking
                     const venueText = e.venue ? e.venue.toLowerCase() : "";
                     const filterText = filter.toLowerCase();
 
@@ -271,6 +271,14 @@ const Dashboard = ({ user, onLogout }) => {
                             onChange={e => setNewEvent({...newEvent, venue: e.target.value})} 
                             required 
                         />
+                        
+                        {/* NEW: Link Input */}
+                        <input 
+                            placeholder="Registration Link (Optional)" 
+                            value={newEvent.link} 
+                            onChange={e => setNewEvent({...newEvent, link: e.target.value})} 
+                        />
+                        
                         <textarea 
                             placeholder="Short Summary" 
                             value={newEvent.summary} 
@@ -325,7 +333,20 @@ const EventCard = ({ data }) => {
           <p>📍 {data.venue}</p>
         </div>
         <div className="tldr-box"><strong>Subject: </strong> {data.summary}</div>
-        <button className="register-btn">Register Now</button>
+        
+        {/* --- THE FIX: Conditional Button Rendering --- */}
+        {data.link && data.link !== "null" && data.link !== "" ? (
+            <a 
+                href={data.link} 
+                target="_blank" 
+                rel="noopener noreferrer" 
+                className="register-btn"
+                style={{display:'flex', justifyContent:'center', textDecoration:'none',alignContent:"center"}}
+            >
+                Register Now
+            </a>
+        ) : null}
+      
       </div>
     </div>
   );

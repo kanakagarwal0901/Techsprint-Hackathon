@@ -15,16 +15,15 @@ const CREDENTIALS_PATH = path.join(__dirname, 'credentials.json');
 const TOKEN_PATH = path.join(__dirname, 'token.json');
 const CACHE_FILE = path.join(__dirname, 'cache.json');
 
-// --- AI CONFIGURATION ---
+// Fixed Model Name (was gemini-.5-flash which is invalid)
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" }); 
+const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash-lite" }); 
 
 // --- AUTO-CLEAN CACHE ---
 if (fs.existsSync(CACHE_FILE)) {
     try { fs.unlinkSync(CACHE_FILE); } catch(e) {}
 }
 
-// --- HELPER FUNCTIONS ---
 function loadCache() {
     if (!fs.existsSync(CACHE_FILE)) return {};
     return JSON.parse(fs.readFileSync(CACHE_FILE));
@@ -43,11 +42,37 @@ function getGmailClient() {
     return google.gmail({ version: 'v1', auth: oAuth2Client });
 }
 
+// --- NEW HELPER: EXTRACT FULL BODY ---
+// Gmail sends data in base64url format, sometimes nested in parts.
+function getEmailBody(payload) {
+    let body = '';
+    
+    // 1. If simple email, data is directly in body
+    if (payload.body && payload.body.data) {
+        body = Buffer.from(payload.body.data, 'base64').toString('utf-8');
+    } 
+    // 2. If multipart (e.g. text + html), search for text/plain
+    else if (payload.parts) {
+        const textPart = payload.parts.find(p => p.mimeType === 'text/plain');
+        if (textPart && textPart.body && textPart.body.data) {
+            body = Buffer.from(textPart.body.data, 'base64').toString('utf-8');
+        } else {
+            // Fallback to HTML part if text missing, strip tags later if needed
+            const htmlPart = payload.parts.find(p => p.mimeType === 'text/html');
+            if (htmlPart && htmlPart.body && htmlPart.body.data) {
+                body = Buffer.from(htmlPart.body.data, 'base64').toString('utf-8');
+            }
+        }
+    }
+    return body;
+}
+
 async function parseWithGemini(emailText, emailId) {
     const cache = loadCache();
     if (cache[emailId]) return cache[emailId];
 
-    const cleanText = emailText.substring(0, 1000).replace(/\s+/g, ' '); 
+    // Increased limit to 2500 to catch links at the bottom/footer
+    const cleanText = emailText.substring(0, 2500).replace(/\s+/g, ' '); 
     const today = new Date().toISOString().split('T')[0];
 
     const prompt = `
@@ -56,12 +81,11 @@ async function parseWithGemini(emailText, emailId) {
     
     RULES:
     1. "date": YYYY-MM-DD. 
-       - If email says "tomorrow", calculate from ${today}.
-       - If "today", use ${today}.
     2. "time": HH:MM AM/PM.
     3. "venue": Location.
+    4. "link": Extract ANY registration URL (look for http/https links like forms.google, bit.ly, lu.ma, unstop, etc). If multiple, pick the most relevant registration one. If none, return null.
     
-    JSON: { "title": "", "date": "", "time": "", "venue": "", "summary": "" }
+    JSON: { "title": "", "date": "", "time": "", "venue": "", "link": "", "summary": "" }
     Email: "${cleanText}"
     `;
 
@@ -82,11 +106,10 @@ async function parseWithGemini(emailText, emailId) {
 }
 
 app.get('/api/refresh-events', async (req, res) => {
-    console.log("🔄 Fetching emails from the last 48 hours...");
+    console.log("🔄 Fetching emails...");
     try {
         const gmail = getGmailClient();
         
-        // --- THE FIX: "newer_than:2d" ---
         const response = await gmail.users.messages.list({
             userId: 'me',
             maxResults: 20, 
@@ -95,9 +118,8 @@ app.get('/api/refresh-events', async (req, res) => {
 
         const messages = response.data.messages || [];
         
-        // If no emails found in the last 2 days, STOP.
         if (messages.length === 0) {
-            console.log("📭 No relevant emails found in the last 2 days.");
+            console.log("📭 No recent emails.");
             return res.json({ success: true, events: [] });
         }
 
@@ -109,18 +131,23 @@ app.get('/api/refresh-events', async (req, res) => {
             let eventData;
             const cache = loadCache();
 
-            // Fetch Email Content
-            const email = await gmail.users.messages.get({ userId: 'me', id: msg.id });
-            const subjectHeader = email.data.payload.headers.find(h => h.name === 'Subject');
-            const subject = subjectHeader ? subjectHeader.value : "No Subject";
-
-            console.log(`📧 Found: "${subject}"`);
+            // Fetch FULL email to get the body content
+            const email = await gmail.users.messages.get({ userId: 'me', id: msg.id, format: 'full' });
+            
+            // --- FIX: USE DECODED BODY, NOT SNIPPET ---
+            let fullText = getEmailBody(email.data.payload);
+            
+            // Fallback to snippet if body extraction failed
+            if (!fullText || fullText.length < 10) {
+                fullText = email.data.snippet;
+            }
 
             if (cache[msg.id]) {
                 eventData = cache[msg.id];
             } else {
-                eventData = await parseWithGemini(email.data.snippet, msg.id);
-                console.log("   ⏳ Waiting 2s...");
+                console.log(`🤖 Analyzing: ${msg.id}...`);
+                // Pass the FULL TEXT now
+                eventData = await parseWithGemini(fullText, msg.id);
                 await new Promise(resolve => setTimeout(resolve, 2000));
             }
 
@@ -129,16 +156,12 @@ app.get('/api/refresh-events', async (req, res) => {
             const eventDate = new Date(eventData.date);
             if (isNaN(eventDate.getTime())) continue;
 
-            if (eventDate < today) {
-                console.log(`   ❌ Skipped (Past Event: ${eventData.date})`);
-                continue; 
-            }
+            if (eventDate < today) continue; 
 
-            console.log(`   ✅ KEPT: ${eventData.title}`);
             processedEvents.push({ id: msg.id, ...eventData });
         }
 
-        console.log(`🚀 Sending ${processedEvents.length} valid events.`);
+        console.log(`🚀 Sending ${processedEvents.length} events.`);
         res.json({ success: true, events: processedEvents });
 
     } catch (error) {

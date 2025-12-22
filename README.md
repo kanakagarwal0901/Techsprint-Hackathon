@@ -25,23 +25,39 @@ It doesn't just list events; it organizes your life by automatically detecting c
 ## 🛠️ Tech Stack
 * **Frontend:** React.js, CSS3 (Custom animations)
 * **Backend:** Node.js, Express.js
-* **AI Engine:** Google Gemini 2.5 Flash
+* **AI Engine:** Google Gemini 1.5 Flash
 * **Integration:** Gmail API (OAuth 2.0)
 * **Data Handling:** Intelligent JSON Caching (Server-side) & LocalStorage (Client-side)
 
 ## 🚀 How to Run
 
-### 1. Backend Setup
+### Prerequisites
+* Node.js installed on your machine.
+* A Google Cloud Project with Gmail API enabled (for `credentials.json`).
+* A Gemini API Key.
+
+### Setup
 ```bash
+# Navigate to backend folder
 cd mandisync-backend
+
+# Install dependencies
 npm install
-# Create .env file with GEMINI_API_KEY
+
+# Create .env file and add your API Key
+echo "GEMINI_API_KEY=your_key_here" > .env
+echo "PORT=5000" >> .env
+
+# Start the server
 node server.js
 
-### 2. Frontend Setup
-```bash
+# Navigate to frontend folder
 cd mandisync-frontend
+
+# Install dependencies
 npm install
+
+# Start the React App
 npm start
 
 Team:- 404 not found

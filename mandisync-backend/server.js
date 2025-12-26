@@ -5,7 +5,17 @@ const { google } = require('googleapis');
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const fs = require('fs');
 const path = require('path');
+// --- DEPLOYMENT HELPER: Create secrets from Env Vars ---
+// This allows us to paste JSON content into Render Environment Variables
+if (process.env.GOOGLE_CREDENTIALS_JSON && !fs.existsSync(CREDENTIALS_PATH)) {
+    console.log("📝 Creating credentials.json from Environment Variable...");
+    fs.writeFileSync(CREDENTIALS_PATH, process.env.GOOGLE_CREDENTIALS_JSON);
+}
 
+if (process.env.GOOGLE_TOKEN_JSON && !fs.existsSync(TOKEN_PATH)) {
+    console.log("📝 Creating token.json from Environment Variable...");
+    fs.writeFileSync(TOKEN_PATH, process.env.GOOGLE_TOKEN_JSON);
+}
 const app = express();
 app.use(cors());
 app.use(express.json());

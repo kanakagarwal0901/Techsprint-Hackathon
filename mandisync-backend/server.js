@@ -117,68 +117,85 @@ async function parseWithGemini(emailText, emailId) {
     }
 }
 
+// ... inside server.js ...
+
 app.get('/api/refresh-events', async (req, res) => {
-    console.log("🔄 Fetching emails...");
     try {
-        const gmail = getGmailClient();
-        
+        if (!fs.existsSync(TOKEN_PATH)) {
+            return res.status(401).json({ success: false, message: "User not authenticated" });
+        }
+
+        const auth = await authorize();
+        const gmail = google.gmail({ version: 'v1', auth });
+
+        // 1. IMPROVED QUERY: added 'event' and 'invitation' explicitly
         const response = await gmail.users.messages.list({
             userId: 'me',
-            maxResults: 20, 
-            q: 'subject:(event OR session OR hackathon OR contest OR competition OR club OR webinar OR workshop OR internship OR seminar) newer_than:2d' 
+            q: 'newer_than:10d (subject:hackathon OR subject:workshop OR subject:meet OR subject:session OR subject:quiz OR subject:contest OR subject:event OR subject:invitation OR "Dear Students")',
+            maxResults: 15,
         });
 
         const messages = response.data.messages || [];
-        
-        if (messages.length === 0) {
-            console.log("📭 No recent emails.");
-            return res.json({ success: true, events: [] });
+        console.log(`🔎 Found ${messages.length} emails matching query.`);
+
+        const emails = [];
+        for (const message of messages) {
+            const msg = await gmail.users.messages.get({
+                userId: 'me',
+                id: message.id,
+            });
+
+            const headers = msg.data.payload.headers;
+            const subject = headers.find(h => h.name === 'Subject')?.value || 'No Subject';
+            const snippet = msg.data.snippet;
+            
+            // LOGGING: Print every subject found to the terminal
+            console.log(`   - Processing: "${subject}"`);
+
+            // 2. STRONGER PROMPT: explicit instruction for year parsing
+            const prompt = `
+            Extract event details from this email.
+            Current Date: ${new Date().toDateString()}.
+            
+            Email Subject: "${subject}"
+            Email Snippet: "${snippet}"
+            
+            Return ONLY a valid JSON object. Do not use Markdown.
+            Format:
+            {
+              "title": "Short event title",
+              "date": "YYYY-MM-DD",  <-- IMPORTANT: If year is missing, assume next upcoming occurrence.
+              "time": "HH:MM AM/PM",
+              "venue": "Location or 'Online'",
+              "link": "Registration URL or null",
+              "summary": "One sentence summary",
+              "urgent": boolean (true if words like 'urgent', 'deadline', 'today' exist)
+            }
+            If it is NOT an event, return null.
+            `;
+
+            try {
+                const result = await model.generateContent(prompt);
+                const responseText = result.response.text();
+                
+                // Clean the response (remove ```json ... ``` wrappers if Gemini adds them)
+                const cleanJson = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
+                
+                const eventData = JSON.parse(cleanJson);
+
+                if (eventData) {
+                    emails.push({ id: message.id, ...eventData });
+                }
+            } catch (err) {
+                console.log(`   ⚠️ Failed to parse email "${subject}":`, err.message);
+            }
         }
 
-        const processedEvents = [];
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-
-        for (const msg of messages) {
-            let eventData;
-            const cache = loadCache();
-
-            // Fetch FULL email to get the body content
-            const email = await gmail.users.messages.get({ userId: 'me', id: msg.id, format: 'full' });
-            
-            // --- FIX: USE DECODED BODY, NOT SNIPPET ---
-            let fullText = getEmailBody(email.data.payload);
-            
-            // Fallback to snippet if body extraction failed
-            if (!fullText || fullText.length < 10) {
-                fullText = email.data.snippet;
-            }
-
-            if (cache[msg.id]) {
-                eventData = cache[msg.id];
-            } else {
-                console.log(`🤖 Analyzing: ${msg.id}...`);
-                // Pass the FULL TEXT now
-                eventData = await parseWithGemini(fullText, msg.id);
-                await new Promise(resolve => setTimeout(resolve, 2000));
-            }
-
-            if (!eventData || !eventData.date) continue;
-
-            const eventDate = new Date(eventData.date);
-            if (isNaN(eventDate.getTime())) continue;
-
-            if (eventDate < today) continue; 
-
-            processedEvents.push({ id: msg.id, ...eventData });
-        }
-
-        console.log(`🚀 Sending ${processedEvents.length} events.`);
-        res.json({ success: true, events: processedEvents });
+        res.json({ success: true, events: emails });
 
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ error: error.message });
+        console.error("Error fetching emails:", error);
+        res.status(500).json({ success: false, error: error.message });
     }
 });
 

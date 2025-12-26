@@ -5,6 +5,16 @@ const { google } = require('googleapis');
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const fs = require('fs');
 const path = require('path');
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+const PORT = process.env.PORT || 5000;
+const CREDENTIALS_PATH = path.join(__dirname, 'credentials.json');
+const TOKEN_PATH = path.join(__dirname, 'token.json');
+const CACHE_FILE = path.join(__dirname, 'cache.json');
+
 // --- DEPLOYMENT HELPER: Create secrets from Env Vars ---
 // This allows us to paste JSON content into Render Environment Variables
 if (process.env.GOOGLE_CREDENTIALS_JSON && !fs.existsSync(CREDENTIALS_PATH)) {
@@ -16,14 +26,6 @@ if (process.env.GOOGLE_TOKEN_JSON && !fs.existsSync(TOKEN_PATH)) {
     console.log("📝 Creating token.json from Environment Variable...");
     fs.writeFileSync(TOKEN_PATH, process.env.GOOGLE_TOKEN_JSON);
 }
-const app = express();
-app.use(cors());
-app.use(express.json());
-
-const PORT = process.env.PORT || 5000;
-const CREDENTIALS_PATH = path.join(__dirname, 'credentials.json');
-const TOKEN_PATH = path.join(__dirname, 'token.json');
-const CACHE_FILE = path.join(__dirname, 'cache.json');
 
 // Fixed Model Name (was gemini-.5-flash which is invalid)
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);

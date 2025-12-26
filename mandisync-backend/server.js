@@ -125,7 +125,7 @@ app.get('/api/refresh-events', async (req, res) => {
         const response = await gmail.users.messages.list({
             userId: 'me',
             maxResults: 20, 
-            q: 'subject:(event OR session OR hackathon OR contest OR competition OR club OR webinar OR workshop OR internship) newer_than:2d' 
+            q: 'subject:(event OR session OR hackathon OR contest OR competition OR club OR webinar OR workshop OR internship OR seminar) newer_than:2d' 
         });
 
         const messages = response.data.messages || [];

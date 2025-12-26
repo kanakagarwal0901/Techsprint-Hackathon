@@ -123,7 +123,6 @@ const Dashboard = ({ user, onLogout }) => {
   const [loading, setLoading] = useState(true);
   
   const [isModalOpen, setIsModalOpen] = useState(false);
-  // NEW: Added 'link' to state
   const [newEvent, setNewEvent] = useState({ title: "", date: "", time: "", venue: "", link: "", summary: "" });
 
   useEffect(() => {
@@ -134,7 +133,12 @@ const Dashboard = ({ user, onLogout }) => {
 
       try {
         console.log("📡 Frontend: Requesting backend data...");
-        const response = await fetch('http://localhost:5000/api/refresh-events');
+        
+        // --- ⚡ HACKATHON FIX: HARDCODED URL ---
+        // This forces the app to look at your live Render server
+        const API_BASE = 'https://mandisync-backend.onrender.com';
+        
+        const response = await fetch(`${API_BASE}/api/refresh-events`);
         
         if (response.ok) {
             const data = await response.json();
@@ -145,7 +149,6 @@ const Dashboard = ({ user, onLogout }) => {
                     date: e.date, 
                     time: e.time || "Time TBD",
                     venue: e.venue || "Campus",
-                    // NEW: Capture Link
                     link: e.link || null,
                     summary: e.summary || "No details available.",
                     urgent: e.urgent || false,
@@ -272,7 +275,6 @@ const Dashboard = ({ user, onLogout }) => {
                             required 
                         />
                         
-                        {/* NEW: Link Input */}
                         <input 
                             placeholder="Registration Link (Optional)" 
                             value={newEvent.link} 
@@ -334,7 +336,6 @@ const EventCard = ({ data }) => {
         </div>
         <div className="tldr-box"><strong>Subject: </strong> {data.summary}</div>
         
-        {/* --- THE FIX: Conditional Button Rendering --- */}
         {data.link && data.link !== "null" && data.link !== "" ? (
             <a 
                 href={data.link} 

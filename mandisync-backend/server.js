@@ -120,81 +120,92 @@ async function parseWithGemini(emailText, emailId) {
 // ... inside server.js ...
 
 app.get('/api/refresh-events', async (req, res) => {
+    console.log("🔄 API Request Received: /api/refresh-events");
     try {
         if (!fs.existsSync(TOKEN_PATH)) {
+            console.error("❌ Auth Token missing.");
             return res.status(401).json({ success: false, message: "User not authenticated" });
         }
 
         const auth = await authorize();
         const gmail = google.gmail({ version: 'v1', auth });
 
-        // 1. IMPROVED QUERY: added 'event' and 'invitation' explicitly
+        // 1. Fetch Emails (Query broadened to catch your events)
         const response = await gmail.users.messages.list({
             userId: 'me',
-            q: 'newer_than:10d (subject:hackathon OR subject:workshop OR subject:meet OR subject:session OR subject:quiz OR subject:contest OR subject:event OR subject:invitation OR "Dear Students")',
+            q: 'newer_than:15d (subject:hackathon OR subject:workshop OR subject:meet OR subject:session OR subject:quiz OR subject:contest OR subject:event OR subject:invitation OR "Dear Students")',
             maxResults: 15,
         });
 
         const messages = response.data.messages || [];
-        console.log(`🔎 Found ${messages.length} emails matching query.`);
+        console.log(`🔎 Found ${messages.length} matching emails.`);
 
         const emails = [];
+
+        // 2. Process Each Email Safely
         for (const message of messages) {
-            const msg = await gmail.users.messages.get({
-                userId: 'me',
-                id: message.id,
-            });
-
-            const headers = msg.data.payload.headers;
-            const subject = headers.find(h => h.name === 'Subject')?.value || 'No Subject';
-            const snippet = msg.data.snippet;
-            
-            // LOGGING: Print every subject found to the terminal
-            console.log(`   - Processing: "${subject}"`);
-
-            // 2. STRONGER PROMPT: explicit instruction for year parsing
-            const prompt = `
-            Extract event details from this email.
-            Current Date: ${new Date().toDateString()}.
-            
-            Email Subject: "${subject}"
-            Email Snippet: "${snippet}"
-            
-            Return ONLY a valid JSON object. Do not use Markdown.
-            Format:
-            {
-              "title": "Short event title",
-              "date": "YYYY-MM-DD",  <-- IMPORTANT: If year is missing, assume next upcoming occurrence.
-              "time": "HH:MM AM/PM",
-              "venue": "Location or 'Online'",
-              "link": "Registration URL or null",
-              "summary": "One sentence summary",
-              "urgent": boolean (true if words like 'urgent', 'deadline', 'today' exist)
-            }
-            If it is NOT an event, return null.
-            `;
-
             try {
-                const result = await model.generateContent(prompt);
-                const responseText = result.response.text();
-                
-                // Clean the response (remove ```json ... ``` wrappers if Gemini adds them)
-                const cleanJson = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
-                
-                const eventData = JSON.parse(cleanJson);
+                const msg = await gmail.users.messages.get({ userId: 'me', id: message.id });
+                const headers = msg.data.payload.headers;
+                const subject = headers.find(h => h.name === 'Subject')?.value || 'No Subject';
+                const snippet = msg.data.snippet;
 
-                if (eventData) {
-                    emails.push({ id: message.id, ...eventData });
+                console.log(`   👉 Analyzing: "${subject}"...`);
+
+                const prompt = `
+                Analyze this email for an event.
+                Current Date: ${new Date().toDateString()}.
+                Subject: "${subject}"
+                Snippet: "${snippet}"
+                
+                Return ONLY a JSON object (no markdown, no extra text).
+                Format:
+                {
+                  "title": "Short title",
+                  "date": "YYYY-MM-DD",
+                  "time": "HH:MM AM/PM",
+                  "venue": "Venue",
+                  "link": "Link or null",
+                  "summary": "Summary",
+                  "urgent": false
                 }
-            } catch (err) {
-                console.log(`   ⚠️ Failed to parse email "${subject}":`, err.message);
+                If no event, return null.
+                `;
+
+                const result = await model.generateContent(prompt);
+                let text = result.response.text();
+
+                // 3. IMPROVED JSON CLEANER (The Magic Fix) 🧹
+                // This removes ```json and ``` marks, and finds the first '{' and last '}'
+                text = text.replace(/```json/g, '').replace(/```/g, '');
+                const firstBrace = text.indexOf('{');
+                const lastBrace = text.lastIndexOf('}');
+                
+                if (firstBrace !== -1 && lastBrace !== -1) {
+                    const jsonString = text.substring(firstBrace, lastBrace + 1);
+                    const eventData = JSON.parse(jsonString);
+
+                    if (eventData) {
+                        emails.push({ id: message.id, ...eventData });
+                        console.log(`      ✅ Success: Added "${eventData.title}"`);
+                    } else {
+                        console.log(`      ⚠️ Skipped: AI returned null (Not an event)`);
+                    }
+                } else {
+                    console.log(`      ❌ Error: AI response was not valid JSON.`);
+                }
+
+            } catch (innerError) {
+                // This catch block prevents the whole server from crashing if one email fails!
+                console.error(`      ❌ FAILED processing email ${message.id}:`, innerError.message);
             }
         }
 
+        console.log(`🚀 Sending ${emails.length} events to frontend.`);
         res.json({ success: true, events: emails });
 
     } catch (error) {
-        console.error("Error fetching emails:", error);
+        console.error("🔥 CRITICAL SERVER ERROR:", error);
         res.status(500).json({ success: false, error: error.message });
     }
 });

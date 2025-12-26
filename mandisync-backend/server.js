@@ -117,96 +117,68 @@ async function parseWithGemini(emailText, emailId) {
     }
 }
 
-// ... inside server.js ...
-
 app.get('/api/refresh-events', async (req, res) => {
-    console.log("🔄 API Request Received: /api/refresh-events");
+    console.log("🔄 Fetching emails...");
     try {
-        if (!fs.existsSync(TOKEN_PATH)) {
-            console.error("❌ Auth Token missing.");
-            return res.status(401).json({ success: false, message: "User not authenticated" });
-        }
-
-        const auth = await authorize();
-        const gmail = google.gmail({ version: 'v1', auth });
-
-        // 1. Fetch Emails (Query broadened to catch your events)
+        const gmail = getGmailClient();
+        
         const response = await gmail.users.messages.list({
             userId: 'me',
-            q: 'newer_than:15d (subject:hackathon OR subject:workshop OR subject:meet OR subject:session OR subject:quiz OR subject:contest OR subject:event OR subject:invitation OR "Dear Students")',
-            maxResults: 15,
+            maxResults: 20, 
+            q: 'subject:(event OR session OR hackathon OR contest OR competition OR club OR webinar OR workshop OR internship OR seminar) newer_than:2d' 
         });
 
         const messages = response.data.messages || [];
-        console.log(`🔎 Found ${messages.length} matching emails.`);
-
-        const emails = [];
-
-        // 2. Process Each Email Safely
-        for (const message of messages) {
-            try {
-                const msg = await gmail.users.messages.get({ userId: 'me', id: message.id });
-                const headers = msg.data.payload.headers;
-                const subject = headers.find(h => h.name === 'Subject')?.value || 'No Subject';
-                const snippet = msg.data.snippet;
-
-                console.log(`   👉 Analyzing: "${subject}"...`);
-
-                const prompt = `
-                Analyze this email for an event.
-                Current Date: ${new Date().toDateString()}.
-                Subject: "${subject}"
-                Snippet: "${snippet}"
-                
-                Return ONLY a JSON object (no markdown, no extra text).
-                Format:
-                {
-                  "title": "Short title",
-                  "date": "YYYY-MM-DD",
-                  "time": "HH:MM AM/PM",
-                  "venue": "Venue",
-                  "link": "Link or null",
-                  "summary": "Summary",
-                  "urgent": false
-                }
-                If no event, return null.
-                `;
-
-                const result = await model.generateContent(prompt);
-                let text = result.response.text();
-
-                // 3. IMPROVED JSON CLEANER (The Magic Fix) 🧹
-                // This removes ```json and ``` marks, and finds the first '{' and last '}'
-                text = text.replace(/```json/g, '').replace(/```/g, '');
-                const firstBrace = text.indexOf('{');
-                const lastBrace = text.lastIndexOf('}');
-                
-                if (firstBrace !== -1 && lastBrace !== -1) {
-                    const jsonString = text.substring(firstBrace, lastBrace + 1);
-                    const eventData = JSON.parse(jsonString);
-
-                    if (eventData) {
-                        emails.push({ id: message.id, ...eventData });
-                        console.log(`      ✅ Success: Added "${eventData.title}"`);
-                    } else {
-                        console.log(`      ⚠️ Skipped: AI returned null (Not an event)`);
-                    }
-                } else {
-                    console.log(`      ❌ Error: AI response was not valid JSON.`);
-                }
-
-            } catch (innerError) {
-                // This catch block prevents the whole server from crashing if one email fails!
-                console.error(`      ❌ FAILED processing email ${message.id}:`, innerError.message);
-            }
+        
+        if (messages.length === 0) {
+            console.log("📭 No recent emails.");
+            return res.json({ success: true, events: [] });
         }
 
-        console.log(`🚀 Sending ${emails.length} events to frontend.`);
-        res.json({ success: true, events: emails });
+        const processedEvents = [];
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        for (const msg of messages) {
+            let eventData;
+            const cache = loadCache();
+
+            // Fetch FULL email to get the body content
+            const email = await gmail.users.messages.get({ userId: 'me', id: msg.id, format: 'full' });
+            
+            // --- FIX: USE DECODED BODY, NOT SNIPPET ---
+            let fullText = getEmailBody(email.data.payload);
+            
+            // Fallback to snippet if body extraction failed
+            if (!fullText || fullText.length < 10) {
+                fullText = email.data.snippet;
+            }
+
+            if (cache[msg.id]) {
+                eventData = cache[msg.id];
+            } else {
+                console.log(`🤖 Analyzing: ${msg.id}...`);
+                // Pass the FULL TEXT now
+                eventData = await parseWithGemini(fullText, msg.id);
+                await new Promise(resolve => setTimeout(resolve, 2000));
+            }
+
+            if (!eventData || !eventData.date) continue;
+
+            const eventDate = new Date(eventData.date);
+            if (isNaN(eventDate.getTime())) continue;
+
+            if (eventDate < today) continue; 
+
+            processedEvents.push({ id: msg.id, ...eventData });
+        }
+
+        console.log(`🚀 Sending ${processedEvents.length} events.`);
+        res.json({ success: true, events: processedEvents });
 
     } catch (error) {
-        console.error("🔥 CRITICAL SERVER ERROR:", error);
-        res.status(500).json({ success: false, error: error.message });
+        console.error(error);
+        res.status(500).json({ error: error.message });
     }
 });
 
